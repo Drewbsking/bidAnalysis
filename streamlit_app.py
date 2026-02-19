@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 BASE_DIR = Path(__file__).parent
-BIDS_SHEET_NAME = "Bids"
+BIDS_SHEET_NAMES = ("All", "Bids")
 ITEMS_SHEET_NAME = "Items"
 ITEM_COLUMN_ALIASES = ("Item No", "Item Number", "Item #", "Item")
 NUMERIC_COLUMNS = ("Item No", "Quantity", "Price", "Total Cost", "Bid Rank")
@@ -187,9 +187,16 @@ def _load_year_dataset(
         st.error(f"Failed to load '{label}': {exc}")
         return None
 
-    bids_sheet = _resolve_sheet_name(xls, BIDS_SHEET_NAME)
+    bids_sheet = None
+    for candidate in BIDS_SHEET_NAMES:
+        bids_sheet = _resolve_sheet_name(xls, candidate)
+        if bids_sheet is not None:
+            break
     if bids_sheet is None:
-        st.error(f"Workbook '{label}' is missing the '{BIDS_SHEET_NAME}' sheet.")
+        st.error(
+            f"Workbook '{label}' is missing an '{BIDS_SHEET_NAMES[0]}' or "
+            f"'{BIDS_SHEET_NAMES[1]}' sheet."
+        )
         return None
 
     bids_df = pd.read_excel(xls, sheet_name=bids_sheet, engine="openpyxl")
