@@ -490,10 +490,11 @@ def compute_lowest_bid_table(df: pd.DataFrame) -> pd.DataFrame:
     if len(price_columns) >= 2:
         earliest_year, earliest_col = price_columns[0]
         latest_year, latest_col = price_columns[-1]
+        result[earliest_col] = pd.to_numeric(result[earliest_col], errors="coerce")
+        result[latest_col] = pd.to_numeric(result[latest_col], errors="coerce")
         result["Price Δ"] = result[latest_col] - result[earliest_col]
-        result["Price Δ%"] = (
-            (result[latest_col] - result[earliest_col]) / result[earliest_col]
-        ) * 100
+        denom = result[earliest_col].replace(0, pd.NA)
+        result["Price Δ%"] = ((result[latest_col] - result[earliest_col]) / denom) * 100
 
     return result
 
