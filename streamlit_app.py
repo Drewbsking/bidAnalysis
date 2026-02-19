@@ -221,6 +221,7 @@ def _load_all_sheet(
             base_data["Item No"] = pd.to_numeric(extracted, errors="coerce")
     if "Item No" not in base_data.columns:
         base_data["Item No"] = pd.RangeIndex(start=1, stop=len(base_data) + 1)
+    allowed_items = base_data["Item No"].dropna().unique()
 
     rows: list[pd.DataFrame] = []
     total_cols = df_raw.shape[1]
@@ -246,6 +247,8 @@ def _load_all_sheet(
     dataset = _deduplicate_columns(dataset)
     dataset = _ensure_item_column(dataset)
     dataset = _coerce_numeric(dataset, NUMERIC_COLUMNS)
+    if len(allowed_items):
+        dataset = dataset[dataset["Item No"].isin(allowed_items)]
     if "Description" in dataset.columns:
         dataset = dataset.dropna(subset=["Item No", "Description"], how="all")
     else:
