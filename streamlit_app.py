@@ -172,6 +172,80 @@ def _prepare_items(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _load_all_sheet(
+    xls: pd.ExcelFile, label: str, year_label: str
+) -> Optional[pd.DataFrame]:
+    """Parse the wide-format 'All' sheet into the long bid format."""
+    df_raw = pd.read_excel(xls, sheet_name=label, header=None, engine="openpyxl")
+    if df_raw.shape[0] < 3:
+        st.error(f"Workbook '{label}' has an '{label}' sheet but no data rows.")
+        return None
+
+    vendor_starts = [i for i, val in enumerate(df_raw.iloc[0]) if pd.notna(val)]
+    if not vendor_starts:
+        st.error(
+            f"Workbook '{label}' has an '{label}' sheet but no vendor names in row 1."
+        )
+        return None
+
+    base_end = vendor_starts[0]
+    base_headers = df_raw.iloc[1, :base_end].fillna("")
+    base_data = df_raw.iloc[2:, :base_end].copy()
+    base_data.columns = base_headers
+    if "Quantity" in base_data.columns:
+        base_data = base_data.rename(columns={"Quantity": "Item Quantity"})
+
+    # Align Item No (from Items sheet if present) to keep cross-year joins consistent.
+    items_sheet = _resolve_sheet_name(xls, ITEMS_SHEET_NAME)
+    if items_sheet is not None:
+        items_df = pd.read_excel(xls, sheet_name=items_sheet, engine="openpyxl")
+        items_df = _deduplicate_columns(items_df)
+        if "Item Number" in items_df.columns:
+            item_numbers = pd.to_numeric(items_df["Item Number"], errors="coerce")
+            base_data["Item No"] = (
+                pd.Series(item_numbers).reindex(range(len(base_data))).values
+            )
+        elif "Item No" in items_df.columns:
+            item_numbers = pd.to_numeric(items_df["Item No"], errors="coerce")
+            base_data["Item No"] = (
+                pd.Series(item_numbers).reindex(range(len(base_data))).values
+            )
+        if "Description" in items_df.columns and "Description" not in base_data.columns:
+            base_data["Description"] = items_df["Description"].iloc[: len(base_data)]
+    if "Item No" not in base_data.columns:
+        base_data["Item No"] = pd.RangeIndex(start=1, stop=len(base_data) + 1)
+
+    rows: list[pd.DataFrame] = []
+    total_cols = df_raw.shape[1]
+    for idx, start in enumerate(vendor_starts):
+        vendor_name = str(df_raw.iat[0, start]).strip()
+        next_start = (
+            vendor_starts[idx + 1] if idx + 1 < len(vendor_starts) else total_cols
+        )
+        block_width = next_start - start
+        vendor_cols = df_raw.iloc[1, start : start + block_width].tolist()
+        vendor_block = df_raw.iloc[2:, start : start + block_width].copy()
+        vendor_block.columns = vendor_cols
+        vendor_block["Organization Name"] = vendor_name
+
+        combined = pd.concat(
+            [base_data.reset_index(drop=True), vendor_block.reset_index(drop=True)],
+            axis=1,
+        )
+        combined["Year"] = int(year_label)
+        rows.append(combined)
+
+    dataset = pd.concat(rows, ignore_index=True)
+    dataset = _deduplicate_columns(dataset)
+    dataset = _ensure_item_column(dataset)
+    dataset = _coerce_numeric(dataset, NUMERIC_COLUMNS)
+    value_cols = [col for col in ("Price", "Total Cost", "Quantity") if col in dataset]
+    if value_cols:
+        dataset = dataset[dataset[value_cols].notna().any(axis=1)]
+    dataset = _add_item_labels(dataset)
+    return dataset
+
+
 def _load_year_dataset(
     source: WorkbookSource, label: str, year_label: str
 ) -> Optional[pd.DataFrame]:
@@ -198,6 +272,9 @@ def _load_year_dataset(
             f"'{BIDS_SHEET_NAMES[1]}' sheet."
         )
         return None
+
+    if bids_sheet.lower() == "all":
+        return _load_all_sheet(xls, bids_sheet, year_label)
 
     bids_df = pd.read_excel(xls, sheet_name=bids_sheet, engine="openpyxl")
     bids_df = _deduplicate_columns(bids_df)
