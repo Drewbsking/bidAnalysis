@@ -564,30 +564,80 @@ def show_metrics(df: pd.DataFrame, mode: str) -> None:
     col_weighted.metric(label, weighted_display)
 
 
-def prepare_price_history(df: pd.DataFrame, mode: str) -> pd.DataFrame:
-    if df.empty or "Price" not in df.columns or "Year" not in df.columns:
+def prepare_price_history(
+    df: pd.DataFrame, mode: str, year_domain: Optional[list[int]] = None
+) -> pd.DataFrame:
+    if df.empty or "Year" not in df.columns:
         return pd.DataFrame()
 
-    base = df.dropna(subset=["Price", "Year"]).copy()
-    if base.empty:
-        return pd.DataFrame()
-
+    base = df.copy()
     base["Year"] = pd.to_numeric(base["Year"], errors="coerce")
     base = base.dropna(subset=["Year"])
     if base.empty:
         return pd.DataFrame()
     base["Year"] = base["Year"].astype(int)
 
+    if year_domain:
+        years = sorted({int(y) for y in year_domain})
+    else:
+        years = sorted(base["Year"].dropna().unique().tolist())
+    if not years:
+        return pd.DataFrame()
+
     if mode == "Lowest bid":
+        if "Item No" not in base.columns:
+            return pd.DataFrame()
         if "Item Label" not in base.columns:
             base["Item Label"] = "Item " + base["Item No"].astype(str)
-        result = base[["Item No", "Item Label", "Year", "Price"]].copy()
+        item_info = (
+            base[["Item No", "Item Label"]]
+            .dropna(subset=["Item No"])
+            .drop_duplicates("Item No")
+        )
+        if item_info.empty:
+            return pd.DataFrame()
+
+        if "Price" in base.columns:
+            price_rows = base.dropna(subset=["Price"]).copy()
+            if not price_rows.empty:
+                price_rows = price_rows.groupby(["Item No", "Year"], as_index=False)[
+                    "Price"
+                ].mean()
+            else:
+                price_rows = pd.DataFrame(columns=["Item No", "Year", "Price"])
+        else:
+            price_rows = pd.DataFrame(columns=["Item No", "Year", "Price"])
+
+        year_df = pd.DataFrame({"Year": years})
+        year_df["_key"] = 1
+        item_info = item_info.copy()
+        item_info["_key"] = 1
+        grid = item_info.merge(year_df, on="_key", how="inner").drop(columns=["_key"])
+        result = grid.merge(price_rows, on=["Item No", "Year"], how="left")
+        result["Bid Status"] = result["Price"].where(
+            result["Price"].notna(), "Not bid this year"
+        )
+        result["Bid Status"] = result["Bid Status"].where(
+            result["Bid Status"] == "Not bid this year", "Bid"
+        )
         return result
 
-    summary = base.groupby("Year", as_index=False)["Price"].mean()
-    summary["Price"] = summary["Price"].round(2)
-    summary["Item Label"] = "Average of all bids"
-    return summary
+    if "Price" not in base.columns:
+        return pd.DataFrame()
+
+    summary = (
+        base.dropna(subset=["Price"]).groupby("Year", as_index=False)["Price"].mean()
+    )
+    result = pd.DataFrame({"Year": years}).merge(summary, on="Year", how="left")
+    result["Price"] = result["Price"].round(2)
+    result["Item Label"] = "Average of all bids"
+    result["Bid Status"] = result["Price"].where(
+        result["Price"].notna(), "Not bid this year"
+    )
+    result["Bid Status"] = result["Bid Status"].where(
+        result["Bid Status"] == "Not bid this year", "Bid"
+    )
+    return result
 
 
 def compute_lowest_bid_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -709,7 +759,12 @@ def main() -> None:
         )
 
     st.subheader("Price history")
-    history = prepare_price_history(display_df, mode)
+    selected_year_domain = (
+        sorted(filtered["Year"].dropna().unique().tolist())
+        if "Year" in filtered.columns
+        else None
+    )
+    history = prepare_price_history(display_df, mode, year_domain=selected_year_domain)
     if history.empty:
         st.info("No price history available for the selected scope.")
     else:
@@ -734,37 +789,86 @@ def main() -> None:
                 selected_items = chart_item_info[
                     chart_item_info["Item Label"].isin(selected_labels)
                 ]["Item No"].tolist()
-                chart_data = history[history["Item No"].isin(selected_items)]
-                chart = (
-                    alt.Chart(chart_data)
+                chart_data = history[history["Item No"].isin(selected_items)].copy()
+                year_sort = sorted(chart_data["Year"].dropna().unique().tolist())
+                bid_rows = chart_data[chart_data["Price"].notna()]
+                not_bid_rows = chart_data[chart_data["Price"].isna()]
+
+                base_encoding = {
+                    "x": alt.X("Year:O", title="Year", sort=year_sort),
+                    "color": alt.Color("Item Label:N", title="Item"),
+                }
+                line = (
+                    alt.Chart(bid_rows)
                     .mark_line(point=True)
                     .encode(
-                        x=alt.X("Year:O", title="Year"),
+                        **base_encoding,
                         y=alt.Y("Price:Q", title="Unit price"),
-                        color=alt.Color("Item Label:N", title="Item"),
                         tooltip=[
                             alt.Tooltip("Item Label:N", title="Item"),
                             alt.Tooltip("Year:O", title="Year"),
                             alt.Tooltip("Price:Q", title="Price", format="$.2f"),
+                            alt.Tooltip("Bid Status:N", title="Status"),
                         ],
                     )
-                    .properties(height=400)
                 )
+
+                if not_bid_rows.empty:
+                    chart = line.properties(height=400)
+                else:
+                    if len(selected_items) == 1:
+                        not_bid_mark = alt.Chart(not_bid_rows).mark_text(
+                            text="Not bid", dy=-8, fontSize=10
+                        )
+                    else:
+                        not_bid_mark = alt.Chart(not_bid_rows).mark_point(
+                            shape="cross", size=80
+                        )
+                    not_bid = not_bid_mark.encode(
+                        **base_encoding,
+                        y=alt.value(390),
+                        tooltip=[
+                            alt.Tooltip("Item Label:N", title="Item"),
+                            alt.Tooltip("Year:O", title="Year"),
+                            alt.Tooltip("Bid Status:N", title="Status"),
+                        ],
+                    )
+                    chart = (line + not_bid).properties(height=400)
+
                 st.altair_chart(chart, use_container_width=True)
         else:
-            chart = (
-                alt.Chart(history)
+            year_sort = sorted(history["Year"].dropna().unique().tolist())
+            bid_rows = history[history["Price"].notna()]
+            not_bid_rows = history[history["Price"].isna()]
+            bars = (
+                alt.Chart(bid_rows)
                 .mark_bar()
                 .encode(
-                    x=alt.X("Year:O", title="Year"),
+                    x=alt.X("Year:O", title="Year", sort=year_sort),
                     y=alt.Y("Price:Q", title="Average unit price"),
                     tooltip=[
                         alt.Tooltip("Year:O", title="Year"),
                         alt.Tooltip("Price:Q", title="Average Price", format="$.2f"),
+                        alt.Tooltip("Bid Status:N", title="Status"),
                     ],
                 )
-                .properties(height=400)
             )
+            if not_bid_rows.empty:
+                chart = bars.properties(height=400)
+            else:
+                notes = (
+                    alt.Chart(not_bid_rows)
+                    .mark_text(text="Not bid", dy=-8, fontSize=10)
+                    .encode(
+                        x=alt.X("Year:O", title="Year", sort=year_sort),
+                        y=alt.value(390),
+                        tooltip=[
+                            alt.Tooltip("Year:O", title="Year"),
+                            alt.Tooltip("Bid Status:N", title="Status"),
+                        ],
+                    )
+                )
+                chart = (bars + notes).properties(height=400)
             st.altair_chart(chart, use_container_width=True)
 
     st.download_button(
