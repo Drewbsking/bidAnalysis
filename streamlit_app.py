@@ -419,9 +419,47 @@ def apply_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
                     )
                 ]
             item_options = item_info["Item Label"].tolist()
-            selected_labels = st.multiselect(
-                "Items (by description)", item_options, default=item_options
+            selector_mode = st.radio(
+                "Item selector",
+                options=["List view", "Tag view"],
+                index=0,
+                horizontal=True,
             )
+            if selector_mode == "List view":
+                selection_key = "item_label_selection_map"
+                stored_selection = st.session_state.get(selection_key, {})
+                if not isinstance(stored_selection, dict):
+                    stored_selection = {}
+                current_selection = {
+                    label: bool(stored_selection.get(label, True))
+                    for label in item_options
+                }
+                list_df = pd.DataFrame(
+                    {
+                        "Select": [current_selection[label] for label in item_options],
+                        "Item": item_options,
+                    }
+                )
+                edited_df = st.data_editor(
+                    list_df,
+                    hide_index=True,
+                    use_container_width=True,
+                    height=260,
+                    disabled=["Item"],
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn("Select"),
+                        "Item": st.column_config.TextColumn("Item"),
+                    },
+                    key="item_selector_list_editor",
+                )
+                selected_labels = edited_df.loc[edited_df["Select"], "Item"].tolist()
+                st.session_state[selection_key] = dict(
+                    zip(edited_df["Item"], edited_df["Select"])
+                )
+            else:
+                selected_labels = st.multiselect(
+                    "Items (by description)", item_options, default=item_options
+                )
             if selected_labels:
                 selected_numbers = item_info[
                     item_info["Item Label"].isin(selected_labels)
