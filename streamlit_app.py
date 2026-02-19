@@ -185,9 +185,19 @@ def _load_all_sheet(
         base_data = base_data.rename(columns={"Quantity": "Item Quantity"})
     base_data = base_data.dropna(how="all").reset_index(drop=True)
 
-    # Derive Item No directly from the All sheet; do not touch the Items sheet.
+    # Derive Item No directly from the All sheet.
     base_data = _deduplicate_columns(base_data)
     base_data = _ensure_item_column(base_data)
+    code_item_no = pd.Series(index=base_data.index, dtype="float64")
+    if "Description" in base_data.columns:
+        code_item_no = pd.to_numeric(
+            base_data["Description"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.extract(r"^([0-9]{5,})")[0],
+            errors="coerce",
+        )
     if "Item No" not in base_data.columns:
         # Try extracting leading digits from Description or first column.
         desc_col = None
@@ -204,6 +214,12 @@ def _load_all_sheet(
                 .astype(float)
             )
             base_data["Item No"] = pd.to_numeric(extracted, errors="coerce")
+    else:
+        base_data["Item No"] = pd.to_numeric(base_data["Item No"], errors="coerce")
+
+    if code_item_no.notna().any():
+        base_data["Item No"] = code_item_no.combine_first(base_data["Item No"])
+
     if "Item No" not in base_data.columns:
         base_data["Item No"] = pd.RangeIndex(start=1, stop=len(base_data) + 1)
     allowed_items = base_data["Item No"].dropna().unique()
