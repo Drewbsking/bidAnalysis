@@ -10,7 +10,7 @@ import pandas as pd
 import streamlit as st
 
 BASE_DIR = Path(__file__).parent
-BIDS_SHEET_NAMES = ("All", "Bids")
+BIDS_SHEET_NAMES = ("All",)
 ITEMS_SHEET_NAME = "Items"
 ITEM_COLUMN_ALIASES = ("Item No", "Item Number", "Item #", "Item")
 NUMERIC_COLUMNS = ("Item No", "Quantity", "Price", "Total Cost", "Bid Rank")
@@ -189,29 +189,36 @@ def _load_all_sheet(
         return None
 
     base_end = vendor_starts[0]
-    base_headers = df_raw.iloc[1, :base_end].fillna("")
+    raw_headers = df_raw.iloc[1, :base_end].tolist()
+    base_headers = [
+        str(h).strip() if str(h).strip() else f"Column_{idx}"
+        for idx, h in enumerate(raw_headers)
+    ]
     base_data = df_raw.iloc[2:, :base_end].copy()
     base_data.columns = base_headers
     if "Quantity" in base_data.columns:
         base_data = base_data.rename(columns={"Quantity": "Item Quantity"})
+    base_data = base_data.dropna(how="all").reset_index(drop=True)
 
-    # Align Item No (from Items sheet if present) to keep cross-year joins consistent.
-    items_sheet = _resolve_sheet_name(xls, ITEMS_SHEET_NAME)
-    if items_sheet is not None:
-        items_df = pd.read_excel(xls, sheet_name=items_sheet, engine="openpyxl")
-        items_df = _deduplicate_columns(items_df)
-        if "Item Number" in items_df.columns:
-            item_numbers = pd.to_numeric(items_df["Item Number"], errors="coerce")
-            base_data["Item No"] = (
-                pd.Series(item_numbers).reindex(range(len(base_data))).values
+    # Derive Item No directly from the All sheet; do not touch the Items sheet.
+    base_data = _deduplicate_columns(base_data)
+    base_data = _ensure_item_column(base_data)
+    if "Item No" not in base_data.columns:
+        # Try extracting leading digits from Description or first column.
+        desc_col = None
+        if "Description" in base_data.columns:
+            desc_col = "Description"
+        elif base_data.columns:
+            desc_col = base_data.columns[0]
+        if desc_col:
+            extracted = (
+                base_data[desc_col]
+                .astype(str)
+                .str.extract(r"^([0-9]+)")
+                .iloc[:, 0]
+                .astype(float)
             )
-        elif "Item No" in items_df.columns:
-            item_numbers = pd.to_numeric(items_df["Item No"], errors="coerce")
-            base_data["Item No"] = (
-                pd.Series(item_numbers).reindex(range(len(base_data))).values
-            )
-        if "Description" in items_df.columns and "Description" not in base_data.columns:
-            base_data["Description"] = items_df["Description"].iloc[: len(base_data)]
+            base_data["Item No"] = pd.to_numeric(extracted, errors="coerce")
     if "Item No" not in base_data.columns:
         base_data["Item No"] = pd.RangeIndex(start=1, stop=len(base_data) + 1)
 
@@ -239,7 +246,15 @@ def _load_all_sheet(
     dataset = _deduplicate_columns(dataset)
     dataset = _ensure_item_column(dataset)
     dataset = _coerce_numeric(dataset, NUMERIC_COLUMNS)
-    value_cols = [col for col in ("Price", "Total Cost", "Quantity") if col in dataset]
+    if "Description" in dataset.columns:
+        dataset = dataset.dropna(subset=["Item No", "Description"], how="all")
+    else:
+        dataset = dataset.dropna(subset=["Item No"], how="all")
+    value_cols = [
+        col
+        for col in dataset.columns
+        if col.startswith(("Price", "Total Cost", "Quantity"))
+    ]
     if value_cols:
         dataset = dataset[dataset[value_cols].notna().any(axis=1)]
     dataset = _add_item_labels(dataset)
