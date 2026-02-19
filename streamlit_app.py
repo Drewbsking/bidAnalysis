@@ -267,9 +267,9 @@ def apply_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
         st.header("Options")
         mode = st.radio(
             "Bid view",
-            options=["All bids", "Lowest bidders"],
+            options=["All bids", "Lowest bid"],
             index=0,
-            help="Choose whether to analyze all bids or only the lowest bidder per item/year.",
+            help="Choose whether to analyze all bids or only the lowest bid per item/year.",
         )
         st.subheader("Filters")
         year_values = sorted(df["Year"].dropna().unique().tolist())
@@ -383,9 +383,9 @@ def show_metrics(df: pd.DataFrame, mode: str) -> None:
     avg_price_display = f"${avg_price:,.2f}" if pd.notna(avg_price) else "N/A"
     col_avg.metric("Average unit price", avg_price_display)
 
-    if mode == "Lowest bidders":
+    if mode == "Lowest bid":
         weighted_avg = _weighted_average_lowest(df)
-        label = "Weighted avg (lowest)"
+        label = "Weighted avg (lowest bid)"
     else:
         weighted_avg = _weighted_average_all(df)
         label = "Weighted avg (all)"
@@ -407,7 +407,7 @@ def prepare_price_history(df: pd.DataFrame, mode: str) -> pd.DataFrame:
         return pd.DataFrame()
     base["Year"] = base["Year"].astype(int)
 
-    if mode == "Lowest bidders":
+    if mode == "Lowest bid":
         if "Item Label" not in base.columns:
             base["Item Label"] = "Item " + base["Item No"].astype(str)
         result = base[["Item No", "Item Label", "Year", "Price"]].copy()
@@ -514,7 +514,7 @@ def main() -> None:
         return
 
     filtered, mode = apply_filters(combined)
-    if mode == "Lowest bidders":
+    if mode == "Lowest bid":
         display_df = compute_lowest_bid_view(filtered)
     else:
         display_df = filtered
@@ -525,9 +525,9 @@ def main() -> None:
     st.dataframe(display_df, use_container_width=True)
 
     lowest = compute_lowest_bid_table(filtered)
-    st.subheader("Lowest bidder by item")
+    st.subheader("Lowest bid by item")
     if lowest.empty:
-        st.info("Select both years with price data to compare lowest bidders.")
+        st.info("Select both years with price data to compare lowest bids.")
     else:
         st.dataframe(lowest, use_container_width=True)
         st.download_button(
@@ -542,7 +542,7 @@ def main() -> None:
     if history.empty:
         st.info("No price history available for the selected scope.")
     else:
-        if mode == "Lowest bidders":
+        if mode == "Lowest bid":
             chart_item_info = (
                 history[["Item No", "Item Label"]]
                 .dropna(subset=["Item No"])
