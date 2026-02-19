@@ -380,9 +380,9 @@ def combine_datasets(datasets: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def apply_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+def apply_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, str, list[int]]:
     if df.empty or "Item No" not in df.columns:
-        return df, "All bids"
+        return df, "All bids", []
 
     with st.sidebar:
         st.header("Options")
@@ -483,7 +483,7 @@ def apply_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     filtered = filtered[filtered["Item No"].isin(selected_numbers)]
     if org_selection:
         filtered = filtered[filtered["Organization Name"].isin(org_selection)]
-    return filtered, mode
+    return filtered, mode, year_selection
 
 def _extract_lowest_bids(df: pd.DataFrame) -> pd.DataFrame:
     """Return lowest bid per item/year with original columns."""
@@ -734,7 +734,7 @@ def main() -> None:
         st.warning("No bid data found in the selected workbooks.")
         return
 
-    filtered, mode = apply_filters(combined)
+    filtered, mode, year_selection = apply_filters(combined)
     if mode == "Lowest bid":
         display_df = compute_lowest_bid_view(filtered)
     else:
@@ -759,11 +759,7 @@ def main() -> None:
         )
 
     st.subheader("Price history")
-    selected_year_domain = (
-        sorted(filtered["Year"].dropna().unique().tolist())
-        if "Year" in filtered.columns
-        else None
-    )
+    selected_year_domain = sorted([int(y) for y in year_selection]) if year_selection else None
     history = prepare_price_history(display_df, mode, year_domain=selected_year_domain)
     if history.empty:
         st.info("No price history available for the selected scope.")
@@ -826,7 +822,7 @@ def main() -> None:
                         )
                     not_bid = not_bid_mark.encode(
                         **base_encoding,
-                        y=alt.value(390),
+                        y=alt.value(20),
                         tooltip=[
                             alt.Tooltip("Item Label:N", title="Item"),
                             alt.Tooltip("Year:O", title="Year"),
@@ -861,7 +857,7 @@ def main() -> None:
                     .mark_text(text="Not bid", dy=-8, fontSize=10)
                     .encode(
                         x=alt.X("Year:O", title="Year", sort=year_sort),
-                        y=alt.value(390),
+                        y=alt.value(20),
                         tooltip=[
                             alt.Tooltip("Year:O", title="Year"),
                             alt.Tooltip("Bid Status:N", title="Status"),
