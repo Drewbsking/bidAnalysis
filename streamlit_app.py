@@ -260,6 +260,9 @@ def _load_all_sheet(
     ]
     if value_cols:
         dataset = dataset[dataset[value_cols].notna().any(axis=1)]
+    if "Description" in dataset.columns:
+        description_text = dataset["Description"].fillna("").astype(str).str.strip()
+        dataset = dataset[description_text != ""]
     dataset = _add_item_labels(dataset)
     return dataset
 
@@ -267,7 +270,7 @@ def _load_all_sheet(
 def _load_year_dataset(
     source: WorkbookSource, label: str, year_label: str
 ) -> Optional[pd.DataFrame]:
-    """Read the Bids and Items sheets for a workbook."""
+    """Read the All sheet for a workbook."""
     try:
         xls = pd.ExcelFile(source, engine="openpyxl")
     except PermissionError:
@@ -279,43 +282,12 @@ def _load_year_dataset(
         st.error(f"Failed to load '{label}': {exc}")
         return None
 
-    bids_sheet = None
-    for candidate in BIDS_SHEET_NAMES:
-        bids_sheet = _resolve_sheet_name(xls, candidate)
-        if bids_sheet is not None:
-            break
-    if bids_sheet is None:
-        st.error(
-            f"Workbook '{label}' is missing an '{BIDS_SHEET_NAMES[0]}' or "
-            f"'{BIDS_SHEET_NAMES[1]}' sheet."
-        )
+    all_sheet = _resolve_sheet_name(xls, BIDS_SHEET_NAMES[0])
+    if all_sheet is None:
+        st.error(f"Workbook '{label}' is missing an '{BIDS_SHEET_NAMES[0]}' sheet.")
         return None
 
-    if bids_sheet.lower() == "all":
-        return _load_all_sheet(xls, bids_sheet, year_label)
-
-    bids_df = pd.read_excel(xls, sheet_name=bids_sheet, engine="openpyxl")
-    bids_df = _deduplicate_columns(bids_df)
-    bids_df = _prepare_bids(bids_df, year_label)
-
-    items_df: Optional[pd.DataFrame] = None
-    items_sheet = _resolve_sheet_name(xls, ITEMS_SHEET_NAME)
-    if items_sheet is not None:
-        raw_items = pd.read_excel(xls, sheet_name=items_sheet, engine="openpyxl")
-        raw_items = _deduplicate_columns(raw_items)
-        items_df = _prepare_items(raw_items)
-    else:
-        st.warning(
-            f"Workbook '{label}' does not have an '{ITEMS_SHEET_NAME}' sheet. "
-            "Item descriptions will be blank."
-        )
-
-    if items_df is not None and "Item No" in items_df.columns:
-        dataset = bids_df.merge(items_df, on="Item No", how="left")
-    else:
-        dataset = bids_df
-    dataset = _add_item_labels(dataset)
-    return dataset
+    return _load_all_sheet(xls, all_sheet, year_label)
 
 
 def load_datasets() -> Dict[str, pd.DataFrame]:
