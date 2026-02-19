@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, IO, Optional, Union
 
@@ -343,6 +344,18 @@ def apply_filters(df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
         )
         if item_info is not None and not item_info.empty:
             item_info = item_info.sort_values("Item Label")
+            item_query = st.text_input(
+                "Description contains",
+                value="",
+                help="Literal match. Example: R1-1 matches only descriptions containing R1-1.",
+            ).strip()
+            if item_query:
+                literal_query = re.escape(item_query)
+                item_info = item_info[
+                    item_info["Item Label"].astype(str).str.contains(
+                        literal_query, case=False, na=False, regex=True
+                    )
+                ]
             item_options = item_info["Item Label"].tolist()
             selected_labels = st.multiselect(
                 "Items (by description)", item_options, default=item_options
