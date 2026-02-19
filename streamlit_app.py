@@ -12,6 +12,10 @@ import streamlit as st
 
 BASE_DIR = Path(__file__).parent
 ALL_SHEET_NAME = "All"
+MASTER_WORKBOOK_NAME = "PRS25-7-3.xlsx"
+MASTER_SHEET_NAME = "Sheet"
+MASTER_ITEM_COLUMN = "Item"
+MASTER_COMB_COLUMN = "Comb"
 ITEM_COLUMN_ALIASES = ("Item No", "Item Number", "Item #", "Item")
 NUMERIC_COLUMNS = ("Item No", "Quantity", "Price", "Total Cost", "Bid Rank")
 WorkbookSource = Union[Path, IO[bytes]]
@@ -157,6 +161,47 @@ def _coerce_numeric(df: pd.DataFrame, columns: Union[tuple[str, ...], list[str]]
     return df
 
 
+@st.cache_data(show_spinner=False)
+def _load_master_comb_map() -> Dict[float, str]:
+    """Load Item -> Comb mapping from the master workbook."""
+    path = BASE_DIR / MASTER_WORKBOOK_NAME
+    if not path.exists():
+        return {}
+    try:
+        master = pd.read_excel(path, sheet_name=MASTER_SHEET_NAME, engine="openpyxl")
+    except Exception:
+        return {}
+    required_cols = {MASTER_ITEM_COLUMN, MASTER_COMB_COLUMN}
+    if not required_cols.issubset(master.columns):
+        return {}
+
+    item_numbers = pd.to_numeric(master[MASTER_ITEM_COLUMN], errors="coerce")
+    comb_values = master[MASTER_COMB_COLUMN].fillna("").astype(str).str.strip()
+    mapping_df = pd.DataFrame({"Item No": item_numbers, "Comb": comb_values})
+    mapping_df = mapping_df.dropna(subset=["Item No"])
+    mapping_df = mapping_df[mapping_df["Comb"] != ""]
+    mapping_df = mapping_df.drop_duplicates("Item No", keep="first")
+    return dict(zip(mapping_df["Item No"], mapping_df["Comb"]))
+
+
+def _apply_master_descriptions(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize Description using master Item -> Comb mapping."""
+    if df.empty or "Item No" not in df.columns:
+        return df
+    comb_map = _load_master_comb_map()
+    if not comb_map:
+        return df
+
+    df = df.copy()
+    mapped_desc = df["Item No"].map(comb_map)
+    if "Description" in df.columns:
+        existing_desc = df["Description"].fillna("").astype(str).str.strip()
+        df["Description"] = mapped_desc.where(mapped_desc.notna(), existing_desc)
+    else:
+        df["Description"] = mapped_desc
+    return df
+
+
 def _load_all_sheet(
     xls: pd.ExcelFile, label: str, year_label: str
 ) -> Optional[pd.DataFrame]:
@@ -248,6 +293,7 @@ def _load_all_sheet(
     dataset = _deduplicate_columns(dataset)
     dataset = _ensure_item_column(dataset)
     dataset = _coerce_numeric(dataset, NUMERIC_COLUMNS)
+    dataset = _apply_master_descriptions(dataset)
     if len(allowed_items):
         dataset = dataset[dataset["Item No"].isin(allowed_items)]
     if "Description" in dataset.columns:
