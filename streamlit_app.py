@@ -10,8 +10,7 @@ import pandas as pd
 import streamlit as st
 
 BASE_DIR = Path(__file__).parent
-BIDS_SHEET_NAMES = ("All",)
-ITEMS_SHEET_NAME = "Items"
+ALL_SHEET_NAME = "All"
 ITEM_COLUMN_ALIASES = ("Item No", "Item Number", "Item #", "Item")
 NUMERIC_COLUMNS = ("Item No", "Quantity", "Price", "Total Cost", "Bid Rank")
 WorkbookSource = Union[Path, IO[bytes]]
@@ -157,21 +156,6 @@ def _coerce_numeric(df: pd.DataFrame, columns: Union[tuple[str, ...], list[str]]
     return df
 
 
-def _prepare_bids(df: pd.DataFrame, year_label: str) -> pd.DataFrame:
-    df = _ensure_item_column(df)
-    df = _coerce_numeric(df, NUMERIC_COLUMNS)
-    df["Year"] = int(year_label)
-    return df
-
-
-def _prepare_items(df: pd.DataFrame) -> pd.DataFrame:
-    df = _ensure_item_column(df)
-    df = _coerce_numeric(df, ("Item No",))
-    rename_map = {col: f"Item {col}" for col in df.columns if col != "Item No"}
-    df = df.rename(columns=rename_map)
-    return df
-
-
 def _load_all_sheet(
     xls: pd.ExcelFile, label: str, year_label: str
 ) -> Optional[pd.DataFrame]:
@@ -282,9 +266,9 @@ def _load_year_dataset(
         st.error(f"Failed to load '{label}': {exc}")
         return None
 
-    all_sheet = _resolve_sheet_name(xls, BIDS_SHEET_NAMES[0])
+    all_sheet = _resolve_sheet_name(xls, ALL_SHEET_NAME)
     if all_sheet is None:
-        st.error(f"Workbook '{label}' is missing an '{BIDS_SHEET_NAMES[0]}' sheet.")
+        st.error(f"Workbook '{label}' is missing an '{ALL_SHEET_NAME}' sheet.")
         return None
 
     return _load_all_sheet(xls, all_sheet, year_label)
