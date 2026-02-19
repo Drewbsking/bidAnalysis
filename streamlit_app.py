@@ -28,15 +28,32 @@ def _resolve_sheet_name(xls: pd.ExcelFile, target: str) -> Optional[str]:
     return None
 
 
-def _discover_workbooks() -> Dict[str, Path]:
-    """Return a dict of year label -> workbook path discovered in BASE_DIR."""
+def _discover_workbooks(search_dir: Path) -> Dict[str, Path]:
+    """Return a dict of year label -> workbook path discovered in search_dir."""
     workbooks: Dict[str, Path] = {}
-    for path in sorted(BASE_DIR.glob("*.xlsx")):
+    for path in sorted(search_dir.glob("*.xlsx")):
         year_label = path.stem.strip()
         if not year_label.isdigit():
             continue
         workbooks[year_label] = path
     return workbooks
+
+
+def _discover_bid_type_dirs() -> Dict[str, Path]:
+    """Return bid-type folders that contain at least one .xlsx workbook."""
+    bid_dirs: Dict[str, Path] = {}
+    for path in sorted(BASE_DIR.iterdir()):
+        if not path.is_dir():
+            continue
+        if path.name.startswith("."):
+            continue
+        has_workbook = any(
+            child.is_file() and child.suffix.lower() == ".xlsx"
+            for child in path.iterdir()
+        )
+        if has_workbook:
+            bid_dirs[path.name] = path
+    return bid_dirs
 
 
 def _ensure_item_column(df: pd.DataFrame) -> pd.DataFrame:
@@ -202,9 +219,17 @@ def _load_year_dataset(
 def load_datasets() -> Dict[str, pd.DataFrame]:
     """Load all detected Excel workbooks within the working directory."""
     datasets: Dict[str, pd.DataFrame] = {}
-    workbooks = _discover_workbooks()
     with st.sidebar:
         st.header("Data Sources")
+        bid_dirs = _discover_bid_type_dirs()
+        if bid_dirs:
+            bid_type = st.selectbox("Bid type", options=sorted(bid_dirs.keys()))
+            search_dir = bid_dirs[bid_type]
+        else:
+            st.info("No bid-type folders found. Looking for workbooks in the repo root.")
+            search_dir = BASE_DIR
+
+        workbooks = _discover_workbooks(search_dir)
         if not workbooks:
             st.error("No year-specific workbooks (e.g., 2025.xlsx) were found.")
             return {}
